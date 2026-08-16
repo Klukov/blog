@@ -68,7 +68,24 @@ class.
 ## Markdown → HTML conversion rules
 
 - Escape `<`, `>`, `&` inside `<pre><code>` blocks (e.g. `List<Integer>` → `List&lt;Integer&gt;`).
-- Inline code → `<code>`. Fenced code blocks → `<pre><code class="language-xxx">`.
+- Inline code → `<code>`. Fenced code blocks → `<pre><code class="language-xxx">` (the
+  `language-xxx` class also drives syntax highlighting, see below).
+- If the post has at least one real code block (not just inline `<code>`), add highlight.js so the
+  code actually renders with colors instead of a flat block of text (see
+  `post-001.html`/`post-002.html`/`post-004.html`/`post-006.html` for real examples). Use the
+  **cdnjs** build, not the npm package on jsDelivr — the npm package ships CommonJS source
+  (`require`/`module.exports`) that silently fails as a plain `<script src>` in the browser:
+  ```html
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.12.0/styles/atom-one-dark.min.css">
+  ```
+  in `<head>`, and right before `</body>` (after all the article content, not in `<head>` -
+  `hljs.highlightAll()` only finds code blocks that already exist in the DOM when it runs):
+  ```html
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.12.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  ```
+  No extra markup needed - it auto-detects the language from the existing `language-xxx` class.
+  Skip this entirely for a post with no code blocks (e.g. `post-003.html`, `post-005.html`).
 - For a Mermaid diagram, use `<pre class="mermaid">...</pre>` with raw Mermaid syntax inside (not a
   fenced code block), and add these two tags in `<head>` (see `post-005.html` for a real example):
   ```html
