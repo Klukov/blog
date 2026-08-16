@@ -54,7 +54,7 @@ body {
 
 body.post-page .bg-grid {
   bottom: auto;
-  height: 100vh;
+  height: 50vh;
   mask-image: linear-gradient(to bottom, black 0%, black 35%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 0%, black 35%, transparent 100%);
 }
