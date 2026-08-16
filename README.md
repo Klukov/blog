@@ -20,7 +20,7 @@ src/                 <- the published static site (plain HTML, CSS, vanilla JS, 
     post-00N.html          the published HTML version of resources/00N/blog-00N.md
 ```
 
-The site is 100% static: open `src/index.html` directly in a browser, or host the `src/` folder
+The site is 100% static: open `docs/index.html` directly in a browser, or host the `docs/` folder
 on any static hosting (GitHub Pages, Netlify, etc.). There is no server and no build command.
 
 ## How to add a new post
@@ -32,7 +32,7 @@ actually write and edit going forward - it's never deleted or overwritten by the
 
 ### 2. Convert it to a published HTML page
 
-Create `src/posts/post-00N.html` by hand, using any existing file in `src/posts/` as a template.
+Create `docs/posts/post-00N.html` by hand, using any existing file in `docs/posts/` as a template.
 Every post page has the exact same shape:
 
 ```html
@@ -84,7 +84,7 @@ article pages; the home page intentionally doesn't have it).
 
 ### 3. Add it to the home page list
 
-Add one entry at the **top** of the array in `src/data/posts.js` (newest post first):
+Add one entry at the **top** of the array in `docs/data/posts.js` (newest post first):
 
 ```js
 {
@@ -98,8 +98,8 @@ That's it - the home page automatically shows the new post, numbered, with the r
 
 ## Editing the shared look
 
-- **Colors, spacing, typography** for the whole site: edit `src/style.css` only.
+- **Colors, spacing, typography** for the whole site: edit `docs/style.css` only.
 - **Header/footer/logo/links** shown on every page: edit the `SITE` object at the top of
-  `src/header-footer.js` only. Both files are shared by every page, so one edit updates
+  `docs/header-footer.js` only. Both files are shared by every page, so one edit updates
   the entire site - no need to touch individual post files.
 
