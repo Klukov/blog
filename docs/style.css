@@ -135,6 +135,53 @@ body.post-page .bg-grid {
   margin: 0 0 8px;
 }
 
+.see-also {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 16px 0 40px;
+  padding: 26px 32px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.2s, border-color 0.2s, transform 0.2s;
+}
+.see-also:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+.see-also-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.see-also-label {
+  font-size: 24px;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.see-also-title {
+  font-size: 16px;
+  color: var(--muted);
+}
+.see-also-arrow {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 28px;
+  transition: transform 0.2s, color 0.2s;
+}
+.see-also:hover .see-also-arrow {
+  color: var(--accent);
+  transform: translateX(3px);
+}
+
 .posts {
   margin: 32px 0;
 }
