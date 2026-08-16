@@ -32,7 +32,8 @@ page. `resources/` is read-only input for this task — never modify it.
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Your Post Title — Engineering Blog</title>
-  <link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+  <link rel="icon" type="image/svg+xml" href="../assets/icon-black.svg" media="(prefers-color-scheme: light)">
+  <link rel="icon" type="image/svg+xml" href="../assets/icon-white.svg" media="(prefers-color-scheme: dark)">
   <link rel="stylesheet" href="../style.css">
   <script defer src="../header-footer.js"></script>
 </head>
@@ -104,7 +105,7 @@ class.
   long page. Never use `height: 100%` on `body`/`html` (only `min-height: 100%`) — a hard `height`
   clips the overlay and creates a visible seam partway down a long page.
 - Home page (no `post-page` class): grid is animated and **unmasked** across the entire page.
-- Post pages (`body.post-page`): grid is animated only in the first `100vh`, then fades out via a
+- Post pages (`body.post-page`): grid is animated only in the first `50vh`, then fades out via a
   **linear** mask (`linear-gradient(to bottom, black 0%, black 35%, transparent 100%)`) that reaches
   full transparency exactly at the element's bottom edge, so there's no visible seam. Don't switch
   this to a radial mask with fixed pixel/percent math — it previously caused visible seams.
