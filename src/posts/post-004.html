@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Collections.synchronizedList() Trap Behind a Flaky Test — Engineering Blog</title>
+  <link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+  <link rel="stylesheet" href="../style.css">
+  <script defer src="../header-footer.js"></script>
+</head>
+<body class="post-page">
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="container">
+    <site-header></site-header>
+
+    <main class="post">
+      <article>
+        <h1>The Collections.synchronizedList() Trap Behind a Flaky Test</h1>
+
+        <p>In a project I work on, we had a repository responsible for storing incoming WebSocket messages. To make it thread-safe with minimal effort, the storage backing that repository was implemented as a simple wrapper:</p>
+
+        <pre><code class="language-java">private final List&lt;Message&gt; messages = Collections.synchronizedList(new ArrayList&lt;&gt;());</code></pre>
+
+        <p>It looked correct at first glance. Adding a message and reading messages by index both went through synchronized methods, so no two threads could corrupt the underlying array at the same time.</p>
+
+        <h2>Where It Broke</h2>
+
+        <p>The repository wasn't only used through single <code>add()</code>/<code>get()</code> calls. In one of our tests, several threads pushed messages into the repository concurrently while the test iterated over the whole list to assert on its contents:</p>
+
+        <pre><code class="language-java">for (Message message : repository.getAll()) {
+    // assertions on message
+}</code></pre>
+
+        <p><code>getAll()</code> simply returned the underlying <code>messages</code> list, still backed by <code>Collections.synchronizedList()</code>. Most of the time the test passed, but from time to time on CI it turned flaky, failing with a <code>ConcurrentModificationException</code> thrown mid-iteration. Locally it almost never reproduced, since the timing window where a write and an iteration overlap is narrow. Under CI load, with threads scheduled less predictably, it surfaced often enough to be annoying.</p>
+
+        <h2>Root Cause</h2>
+
+        <p>The mistake was assuming that "synchronized list" means "safe to iterate". It doesn't. The <a href="https://docs.oracle.com/javase/8/docs/api/java/util/Collections.html#synchronizedList-java.util.List-" target="_blank" rel="noopener">official Javadoc for <code>Collections.synchronizedList()</code></a> is explicit about this:</p>
+
+        <blockquote>
+          It is imperative that the user manually synchronize on the returned list when iterating over it:
+          <pre><code class="language-java">List list = Collections.synchronizedList(new ArrayList());
+    ...
+synchronized (list) {
+    Iterator i = list.iterator(); // Must be in synchronized block
+    while (i.hasNext())
+        foo(i.next());
+}</code></pre>
+          Failure to follow this advice may result in non-deterministic behavior.
+        </blockquote>
+
+        <p><code>Collections.synchronizedList()</code> only wraps individual method calls (<code>add</code>, <code>get</code>, <code>size</code>) in a lock. Its <code>iterator()</code> method just returns the backing list's own iterator, unguarded, so <code>hasNext()</code>/<code>next()</code> calls made on it never synchronize on anything. The backing <code>ArrayList</code> iterator is fail-fast: it remembers the list's modification count at creation time and checks it on every <code>next()</code> call. If another thread adds or removes an element while the iteration is in progress, that check fails and <code>next()</code> throws <code>ConcurrentModificationException</code>.</p>
+
+        <p>Wrapping every iteration in <code>synchronized (messages) { ... }</code> as the Javadoc suggests would have fixed the flakiness, but it relies on every caller remembering to synchronize on the right object every time it iterates. That's easy to get right once and forget about later as the code evolves.</p>
+
+        <h2>The Fix: CopyOnWriteArrayList</h2>
+
+        <p>Given our access pattern, messages added concurrently from multiple threads while readers frequently iterate over the whole collection, we replaced the storage with <code>CopyOnWriteArrayList</code>:</p>
+
+        <pre><code class="language-java">private final List&lt;Message&gt; messages = new CopyOnWriteArrayList&lt;&gt;();</code></pre>
+
+        <p><code>CopyOnWriteArrayList</code> takes the opposite trade-off from <code>synchronizedList()</code>. Every <code>add()</code>/<code>remove()</code> copies the entire underlying array and atomically swaps the reference, so writes are more expensive. In exchange, an iterator obtained from it operates on a fixed snapshot of the array taken at the moment it was created. Concurrent additions or removals from other threads never affect that snapshot, so <code>ConcurrentModificationException</code> becomes structurally impossible and no manual <code>synchronized</code> block around the loop is needed.</p>
+
+        <p>Producers keep adding messages concurrently while the test iterates over a stable snapshot, and the flakiness disappeared entirely.</p>
+
+        <h2>Takeaway</h2>
+
+        <p><code>Collections.synchronizedList()</code> only makes individual operations atomic, not iteration. If your code iterates over such a list from multiple threads, you either synchronize manually on every iteration, or pick a collection built for that access pattern, like <code>CopyOnWriteArrayList</code> for frequent reads and rare writes.</p>
+      </article>
+    </main>
+
+    <site-footer></site-footer>
+  </div>
+</body>
+</html>
+

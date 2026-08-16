@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dynamic Lock Management: Concurrency by ID — Engineering Blog</title>
+  <link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+  <link rel="stylesheet" href="../style.css">
+  <script defer src="../header-footer.js"></script>
+</head>
+<body class="post-page">
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="container">
+    <site-header></site-header>
+
+    <main class="post">
+      <article>
+        <h1>Dynamic Lock Management: Concurrency by ID</h1>
+
+        <p>During a live-coding interview, I was tasked with the following concurrency problem: ensure that only one task with a given ID runs at a time in a single-instance, multi-threaded environment. The resulting code is a perfect example of how to handle dynamic lock management without memory leaks.</p>
+
+        <h2>The Problem</h2>
+        <p>Tasks sharing the same identifier (<code>ID</code>) must execute sequentially. Tasks with different IDs must be running concurrently.</p>
+        <p>A naive approach <code>ConcurrentHashMap&lt;ID, Object&gt;</code> to hold locks causes memory leaks, as the map grows indefinitely. We need a way to allocate locks dynamically when an ID arrives and clean them up safely when no longer in use.</p>
+
+        <h2>The Solution</h2>
+        <p>By combining <code>ConcurrentHashMap</code> with reference counting via <code>AtomicInteger</code>, we can achieve fine-grained, self-cleaning locks.</p>
+        <p>You can find the full source code <a href="https://github.com/Klukov/klukov-utils/blob/main/src/main/java/org/klukov/utils/processing/ConcurrentProcessor.java" target="_blank" rel="noopener">here on GitHub</a>.</p>
+
+        <pre><code class="language-java">package org.klukov.utils.processing;
+
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+public class ConcurrentProcessor&lt;ID&gt; {
+
+    private final ConcurrentHashMap&lt;ID, AtomicInteger&gt; LOCK_MAP = new ConcurrentHashMap&lt;&gt;();
+
+    public void process(ID id, Runnable runnable) {
+        process(
+                id,
+                () -&gt; {
+                    runnable.run();
+                    return null;
+                });
+    }
+
+    public &lt;T&gt; T process(ID id, Supplier&lt;T&gt; supplier) {
+        log.debug("Incoming request with id = {}", id);
+
+        var lock = LOCK_MAP.compute(id, (key, value) -&gt; createOrIncrement(value));
+        log.debug("Acquired lock for id = {}", id);
+
+        synchronized (lock) {
+            log.debug("Processing id = {}", id);
+            try {
+                return supplier.get();
+            } finally {
+                log.debug("Finished processing with id = {}", id);
+                LOCK_MAP.computeIfPresent(id, (key, value) -&gt; decrement(value).orElse(null));
+                log.debug("Lock removed with id = {}", id);
+            }
+        }
+    }
+
+    @NonNull private AtomicInteger createOrIncrement(AtomicInteger value) {
+        return value == null ? new AtomicInteger(1) : increment(value);
+    }
+
+    @NonNull private AtomicInteger increment(@NonNull AtomicInteger value) {
+        value.incrementAndGet();
+        return value;
+    }
+
+    private Optional&lt;AtomicInteger&gt; decrement(@NonNull AtomicInteger value) {
+        var current = value.decrementAndGet();
+        if (current &lt; 1) {
+            return Optional.empty();
+        }
+        return Optional.of(value);
+    }
+}</code></pre>
+
+        <h2>How It Works</h2>
+        <p>The implementation avoids race conditions and memory leaks through three mechanisms:</p>
+
+        <h3>1. Atomic Map Operations</h3>
+        <p><code>ConcurrentHashMap.compute()</code> and <code>computeIfPresent()</code> guarantee that the lambda executes atomically for a specific key. This prevents race conditions when multiple threads request a lock for the same ID simultaneously.</p>
+
+        <h3>2. Reference Counting</h3>
+        <p>We use <code>AtomicInteger</code> as both the monitor for the <code>synchronized</code> block and a reference counter. It tracks exactly how many threads are waiting for or actively holding the lock.</p>
+
+        <h3>3. Safe Cleanup</h3>
+        <p>In the <code>finally</code> block, <code>computeIfPresent</code> locks the map bucket. If the reference count drops to zero (<code>decrement</code> returns <code>Optional.empty()</code>, mapped to <code>null</code>), the <code>ConcurrentHashMap</code> safely removes the entry. The lock is destroyed only when no threads are queued up to use it.</p>
+
+        <p>By keeping the state minimal and leveraging atomic map operations, this pattern efficiently handles entity-based ordering while maintaining high global throughput.</p>
+
+        <blockquote>P.S. While I passed the technical round (though ultimately didn't align with HR), it was one of the most educational live-coding tasks I've ever received.</blockquote>
+      </article>
+    </main>
+
+    <site-footer></site-footer>
+  </div>
+</body>
+</html>
+

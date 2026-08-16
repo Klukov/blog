@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Engineering Blog</title>
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="header-footer.js"></script>
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="container">
+    <site-header></site-header>
+
+    <section class="hero">
+      <h1 class="title">Engineering Blog</h1>
+      <p class="subtitle">Notes on backend engineering, concurrency bugs and the fixes that came out of them.</p>
+    </section>
+
+    <section class="posts" aria-labelledby="posts-title">
+      <div class="posts-head">
+        <h2 id="posts-title" class="posts-title">Posts</h2>
+      </div>
+      <div id="posts-grid" class="grid" role="list"></div>
+    </section>
+
+    <site-footer></site-footer>
+  </div>
+
+  <script src="data/posts.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
+

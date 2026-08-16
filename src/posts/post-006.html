@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>One User, Many Sessions: A Thread-Safe Map of Lists — Engineering Blog</title>
+  <link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+  <link rel="stylesheet" href="../style.css">
+  <script defer src="../header-footer.js"></script>
+</head>
+<body class="post-page">
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="container">
+    <site-header></site-header>
+
+    <main class="post">
+      <article>
+        <h1>One User, Many Sessions: A Thread-Safe Map of Lists</h1>
+
+        <p>Some notifications can't wait for a poll. We needed them pushed the moment they happen, so we used server-sent events instead. We run multiple pods, and a state change can originate on any of them, so it's broadcast over RabbitMQ: every pod receives it and tries to push it to the affected user. Whichever pod actually holds that user's connection succeeds; the others simply have nothing to do.</p>
+
+        <h2>One Key, Many Connections</h2>
+
+        <p>That's the easy part. It gets harder because a single pod can hold more than one open connection for the same user at once — phone in one hand, desktop tab open at work, both happening to land on the same instance. One event, and one pod might have to push it out over several connections.</p>
+
+        <p>The obvious storage is <code>user -&gt; connection</code>. That breaks the moment a second session lands on the same pod. It has to be <code>user -&gt; list of connections</code>.</p>
+
+        <p><code>ConcurrentHashMap</code> makes the map itself safe to read and write from multiple threads. It says nothing about the <em>value</em> stored under each key. If that value is a plain <code>List</code>, mutating it concurrently — one thread adding a new session, another removing a closed one, a third iterating it to broadcast an event — is a race condition, regardless of how "concurrent" the map is.</p>
+
+        <p>We needed three operations to be safe at once:</p>
+        <ul>
+          <li>add a single connection when a session opens,</li>
+          <li>remove a single connection when a session closes,</li>
+          <li>read a stable snapshot of the list to push an event to every open connection on this pod.</li>
+        </ul>
+
+        <p>And once a user's last session on this pod closes, the key shouldn't linger in the map with an empty list forever — that's a slow memory leak.</p>
+
+        <h2>ConcurrentAddRemoveListInMap</h2>
+
+        <p><a href="https://github.com/Klukov/klukov-utils/blob/main/src/main/java/org/klukov/utils/structures/ConcurrentAddRemoveListInMap.java" target="_blank" rel="noopener"><code>ConcurrentAddRemoveListInMap&lt;K, E&gt;</code></a> wraps a <code>ConcurrentHashMap&lt;K, Collection&lt;E&gt;&gt;</code> and handles all three operations atomically at the map-bucket level:</p>
+
+        <pre><code class="language-java">public class ConcurrentAddRemoveListInMap&lt;K, E&gt; {
+
+    private final Map&lt;K, Collection&lt;E&gt;&gt; storage = new ConcurrentHashMap&lt;&gt;();
+    private final Supplier&lt;? extends Collection&lt;E&gt;&gt; collectionSupplier;
+
+    public void add(K key, E value) {
+        storage.compute(key, (k, collection) -&gt; {
+            if (collection == null) {
+                collection = collectionSupplier.get();
+            }
+            collection.add(value);
+            return collection;
+        });
+    }
+
+    public void remove(K key, E value) {
+        storage.computeIfPresent(key, (k, collection) -&gt; {
+            collection.remove(value);
+            return collection.isEmpty() ? null : collection;
+        });
+    }
+
+    public List&lt;E&gt; getCopyOfElements(K key) {
+        var collection = storage.get(key);
+        return collection == null ? Collections.emptyList() : List.copyOf(collection);
+    }
+}</code></pre>
+
+        <p>Two details do all the work here:</p>
+        <ul>
+          <li><strong><code>compute</code> / <code>computeIfPresent</code></strong> run their lambda atomically per key. Two threads touching the <em>same</em> user never interleave; two threads touching <em>different</em> users never block each other.</li>
+          <li><strong><code>remove</code> returning <code>null</code></strong> when the collection is empty tells <code>ConcurrentHashMap</code> to drop the key entirely. No manual cleanup, no leftover empty lists.</li>
+          <li><strong><code>getCopyOfElements</code></strong> always returns <code>List.copyOf(collection)</code> — a snapshot, not a live view — so iterating it to broadcast an event is safe even while another thread is adding or removing sessions at the same time.</li>
+        </ul>
+
+        <h2>Throughput vs. Consistency</h2>
+
+        <p>The underlying collection isn't hardcoded — it's supplied by the caller, and the class ships two ready-made factories:</p>
+
+        <table>
+          <thead>
+            <tr><th>Factory</th><th>Backing collection</th><th>Trade-off</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>highConcurrentListInMap()</code></td>
+              <td><code>ConcurrentLinkedQueue</code></td>
+              <td>Fastest under heavy churn, but a snapshot can — in rare interleavings — reflect a state that never truly existed at any single point in time.</td>
+            </tr>
+            <tr>
+              <td><code>consistentConcurrentListInMap()</code></td>
+              <td><code>CopyOnWriteArrayList</code></td>
+              <td>Every snapshot is a real, consistent copy. Cost scales with list length on every add/remove.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>For our SSE case, the choice was easy. A user rarely has more than a couple of sessions open, so the copy-on-write cost is negligible, while getting a wrong or half-updated snapshot means a real event silently missing a real connection. We use <code>consistentConcurrentListInMap()</code>. The high-throughput variant is there for cases with large, fast-changing lists where an occasional inconsistent read is an acceptable trade for speed.</p>
+
+        <h2>Links</h2>
+        <ul class="post-links">
+          <li>Full library: <a href="https://github.com/Klukov/klukov-utils" target="_blank" rel="noopener">klukov-utils</a></li>
+          <li><a href="https://github.com/Klukov/klukov-utils/blob/main/src/main/java/org/klukov/utils/structures/ConcurrentAddRemoveListInMap.java" target="_blank" rel="noopener"><code>ConcurrentAddRemoveListInMap.java</code></a></li>
+        </ul>
+      </article>
+    </main>
+
+    <site-footer></site-footer>
+  </div>
+</body>
+</html>
+

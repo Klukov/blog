@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Context Lock for Phone Number Validation — Engineering Blog</title>
+  <link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+  <link rel="stylesheet" href="../style.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "dark" });</script>
+  <script defer src="../header-footer.js"></script>
+</head>
+<body class="post-page">
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="container">
+    <site-header></site-header>
+
+    <main class="post">
+      <article>
+        <h1>Context Lock for Phone Number Validation</h1>
+
+        <p>We run a sales system that collects leads from external data providers. One recurring headache with this kind of integration is duplicates. Some providers would resend the exact same lead with a different <code>Idempotency-Key</code>, others wouldn't send an idempotency key at all. A naive idempotency check at the API boundary wasn't enough to stop the same contact from entering our pipeline twice.</p>
+
+        <p>So, basic idempotency validation at request level was not enough.
+        The same contact could still reach async processing more than once.</p>
+
+        <h2>Processing Flow</h2>
+        <ol>
+          <li>Lead arrives.</li>
+          <li>Idempotency key is validated (if present).</li>
+          <li>Lead is persisted.</li>
+          <li>Async validation starts (including phone number checks).</li>
+          <li>Lead is accepted or rejected by the state machine.</li>
+        </ol>
+
+        <p>Important detail: we keep all incoming leads for business history, including duplicates.
+        Rejected leads stay in storage for business and audit reasons, but are not processed or shown further.</p>
+
+        <h2>Why Plain Redis Lock Was Not Enough</h2>
+        <p>We needed a lock on the phone number in async validation.
+        But a plain lock failed in two cases:</p>
+        <ol>
+          <li>One phone number could appear in more than one lead.</li>
+          <li>Async processing could fail and retry.</li>
+        </ol>
+        <p>On retry, the same lead should continue.
+        With a plain lock, it would be blocked until TTL expiry.</p>
+
+        <h2>Context Lock Rules</h2>
+        <p>Each phone-number lock stores a <code>context</code> (processing identifier).</p>
+        <ul>
+          <li>key missing -&gt; acquire lock (<code>true</code>)</li>
+          <li>same context -&gt; refresh TTL and return <code>true</code></li>
+          <li>different context -&gt; do not refresh TTL and return <code>false</code></li>
+        </ul>
+        <p>This gave us the behavior we needed:
+        same process retry = allowed, competing process = blocked.</p>
+        <p>Release was added as optional cleanup.
+        Core safety still comes from context check + TTL.</p>
+
+        <h2>How It Works</h2>
+
+        <pre class="mermaid">
+flowchart TD
+    A[Async worker starts validation] --&gt; B[Acquire lock for phone number with context]
+    B --&gt; C{Lock key exists?}
+    C --&gt;|No| D[Set key = context with TTL]
+    D --&gt; E[Return true and process lead]
+
+    C --&gt;|Yes| F{Stored context == incoming context?}
+    F --&gt;|Yes| G[Refresh TTL]
+    G --&gt; E
+
+    F --&gt;|No| H[Return false]
+    H --&gt; I[Skip processing for now]
+
+    E --&gt; J[Validation finished]
+    J --&gt; K[Optional release]
+        </pre>
+
+        <h2>Links</h2>
+        <ul class="post-links">
+          <li>Full library: <a href="https://github.com/Klukov/klukov-utils-redis/" target="_blank" rel="noopener">klukov-utils-redis</a></li>
+          <li><a href="https://github.com/Klukov/klukov-utils-redis/blob/master/src/main/java/org/klukov/utils/redis/lock/context/ContextRedisLock.java" target="_blank" rel="noopener"><code>ContextRedisLock.java</code></a></li>
+          <li><a href="https://github.com/Klukov/klukov-utils-redis/blob/master/src/main/resources/redis/context-lock-acquire.lua" target="_blank" rel="noopener"><code>context-lock-acquire.lua</code></a></li>
+          <li><a href="https://github.com/Klukov/klukov-utils-redis/blob/master/src/main/resources/redis/context-lock-release.lua" target="_blank" rel="noopener"><code>context-lock-release.lua</code></a></li>
+        </ul>
+      </article>
+    </main>
+
+    <site-footer></site-footer>
+  </div>
+</body>
+</html>
+
